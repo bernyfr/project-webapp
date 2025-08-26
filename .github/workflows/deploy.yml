@@ -1,114 +1,176 @@
-name: CI/CD Pipeline - Project WebApp
+name: WebApp CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
-  push:
-    tags:
-      - 'v*.*.*' # Semantic versioning for production
+    branches: [ "main" ]
+    tags:     [ "v*.*.*" ]
+
+env:
+  REGION: us-central1
+  CLUSTER_STAGING: webapp-staging
+  CLUSTER_PROD: webapp-prod
+  NAMESPACE_STAGING: staging
+  NAMESPACE_PROD: production
+  CHART_PATH: ./helm/webapp
+  IMAGE_NAME: hello-app
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build & Push Docker Image
+    name: Build & Push Docker
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v2
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Authenticate with GCP
-        uses: google-github-actions/auth@v1
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Configure GCP project
-        run: gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io --quiet
 
-      - name: Build Docker image
-        run: docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-app:latest ./app
+      - name: Compute image tag (SHA for branches, tag for releases)
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"   # e.g. v1.2.3
+          else
+            TAG="$(git rev-parse --short HEAD)"
+          fi
+          echo "image_tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Using image tag: ${TAG}"
 
-      - name: Push Docker image
-        run: docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-app:latest
+      - name: Build image
+        run: |
+          docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }} ./app
+
+      - name: Push image
+        run: |
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }}
 
   deploy-staging:
     name: Deploy to Staging
+    if: startsWith(github.ref, 'refs/heads/')   # only on branch pushes
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Get GKE credentials (staging)
+        run: |
+          gcloud container clusters get-credentials "${{ env.CLUSTER_STAGING }}" \
+            --region "${{ env.REGION }}" --project "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Create namespace (idempotent)
+        run: |
+          kubectl create namespace ${{ env.NAMESPACE_STAGING }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Helm lint
+        run: |
+          helm lint ${{ env.CHART_PATH }} -f ${{ env.CHART_PATH }}/values-staging.yaml
+
+      - name: Deploy with Helm (staging)
+        run: |
+          helm upgrade --install webapp ${{ env.CHART_PATH }} \
+            -f ${{ env.CHART_PATH }}/values-staging.yaml \
+            --namespace ${{ env.NAMESPACE_STAGING }} \
+            --set image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=${{ needs.build.outputs.image_tag }}
+
+  approve-production:
+    name: Manual Approval & Policy Checks
+    if: startsWith(github.ref, 'refs/tags/')    # only on tag pushes
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Authenticate with GCP
-        uses: google-github-actions/auth@v1
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Get kubeconfig for staging
+      - name: Validate actor is allowed
         run: |
-          gcloud container clusters get-credentials webapp-staging \
-            --region us-central1 \
-            --project ${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Deploy Helm chart to Staging
-        run: |
-          helm upgrade --install webapp ./helm/webapp \
-            -f ./helm/webapp/values-staging.yaml \
-            --namespace staging
-
-  approve-production:
-    name: Manual Approval for Production
-    needs: deploy-staging
-    runs-on: ubuntu-latest
-    steps:
-      - name: Manual approval & checks
-        run: |
-          echo "Triggering user: $GITHUB_ACTOR"
-          ALLOWED_USERS="${{ secrets.ALLOWED_PROD_USERS }}"
-          if ! echo "$ALLOWED_USERS" | grep -qw "$GITHUB_ACTOR"; then
-            echo "Error: User $GITHUB_ACTOR is not allowed to deploy to production."
+          echo "Triggered by: $GITHUB_ACTOR"
+          ALLOWED="${{ secrets.ALLOWED_PROD_USERS }}"
+          if ! echo "$ALLOWED" | tr ',' '\n' | grep -Fxq "$GITHUB_ACTOR"; then
+            echo "❌ $GITHUB_ACTOR is not allowed to deploy to production."
             exit 1
           fi
+          echo "Actor allowed ✔️"
 
-          # Ensure triggered by a tag
-          if [ -z "$GITHUB_REF" ]; then
-            echo "Error: No Git ref found. Abort."
-            exit 1
+      - name: Validate SemVer tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "Tag: $TAG"
+          if [[ ! "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Tag must be SemVer (vX.Y.Z)"; exit 1
           fi
-
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          echo "Tag name: $TAG_NAME"
-
-          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Error: Tag $TAG_NAME does not match Semantic Versioning."
-            exit 1
-          fi
-
-          echo "✅ Approval passed. Production deploy allowed."
+          echo "SemVer OK ✔️"
 
   deploy-production:
     name: Deploy to Production
-    needs: approve-production
+    if: startsWith(github.ref, 'refs/tags/')    # only on tag pushes
+    needs: [build, approve-production]
     runs-on: ubuntu-latest
+    environment: production   # <-- requires manual approval in GitHub Environments
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Authenticate with GCP
-        uses: google-github-actions/auth@v1
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Get kubeconfig for production
-        run: |
-          gcloud container clusters get-credentials webapp-prod \
-            --region us-central1 \
-            --project ${{ secrets.GCP_PROJECT_ID }}
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
 
-      - name: Deploy Helm chart to Production
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Get GKE credentials (prod)
         run: |
-          helm upgrade --install webapp ./helm/webapp \
-            -f ./helm/webapp/values-prod.yaml \
-            --namespace production
+          gcloud container clusters get-credentials "${{ env.CLUSTER_PROD }}" \
+            --region "${{ env.REGION }}" --project "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Create namespace (idempotent)
+        run: |
+          kubectl create namespace ${{ env.NAMESPACE_PROD }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Helm lint
+        run: |
+          helm lint ${{ env.CHART_PATH }} -f ${{ env.CHART_PATH }}/values-prod.yaml
+
+      - name: Deploy with Helm (production)
+        run: |
+          helm upgrade --install webapp ${{ env.CHART_PATH }} \
+            -f ${{ env.CHART_PATH }}/values-prod.yaml \
+            --namespace ${{ env.NAMESPACE_PROD }} \
+            --set image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=${{ needs.build.outputs.image_tag }}
