@@ -1,118 +1,148 @@
-# project-webapp
-Project to host a webapp
+# DevOps Assignment – Hello App on GKE
 
-# GKE Infrastructure with Terraform, Docker, Helm.
-
-This repository contains Terraform code to provision GKE clusters in different environments (staging and prod), and automation scripts to build and push Docker images to Google Artifact Registry.
+This repository contains a simple "Hello World" web application deployed on **Google Kubernetes Engine (GKE)** using **Terraform**, **Helm**, and **GitHub Actions** CI/CD.
 
 ---
 
-## 📂 Repository Structure
+## Table of Contents
 
-project-webapp/
-├── infra/                       # Terraform configs
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── staging.tfvars
-├── prod.tfvars
-├── app/                         # Application development and containerization
-├── app.py
-├── Dockerfile
-├── requirements.txt
-├── .gitignore
-└── README.md
-
-
-- **main.tf** – Terraform resources definition.
-- **variables.tf** – Input variables.
-- **outputs.tf** – Outputs after cluster creation.
-- **staging.tfvars** – Variables for staging environment.
-- **prod.tfvars** – Variables for production environment.
-- **.gitignore** – Ignores Terraform local files and secrets.
+1. [Project Structure](#project-structure)
+2. [Section #1 – Infrastructure Provisioning](#section-1---infrastructure-provisioning)
+3. [Section #2 – Application Development & Containerization](#section-2---application-development--containerization)
+4. [Section #3 – Helm Deployment](#section-3---helm-deployment)
+5. [Section #4 – CI/CD Pipeline](#section-4---cicd-pipeline)
+6. [Security Considerations](#security-considerations)
+7. [Testing](#testing)
+8. [Cleanup](#cleanup)
 
 ---
 
-## ⚙️ Prerequisites
+## Infrastructure Provisioning
 
-1. Install [Terraform](https://developer.hashicorp.com/terraform/downloads).
-2. Install [gcloud CLI](https://cloud.google.com/sdk/docs/install).
-3. Authenticate with GCP:
-   ```bash
-   gcloud auth application-default login
+We provision **two GKE clusters** (staging & production) using Terraform:
 
-### Usage
+- Private clusters with RBAC enabled
+- Configurable parameters:
+  - Cluster name
+  - Node type
+  - Node count
+  - Region/zone
+- Separate **Terraform workspaces** for `staging` and `production`
 
-This apporach is using Terraform Workspaces in order to deploy each cluster.
-In larger projects a separate state backends will be the best method.
+### Example Commands
 
-1. **Initialize Terraform**
-   ```bash
-   cd infra
-   terraform init
-
-2. **Apply changes per environment**
-
-Staging:
 ```bash
-terraform workspace select staging
+# Initialize Terraform
+terraform init
+
+# Select workspace
+terraform workspace select staging || terraform workspace new staging
+
+# Plan & apply
+terraform plan -var-file=staging.tfvars
 terraform apply -var-file=staging.tfvars
 
-
-Production:
-```bash
-terraform workspace select prod
+# Repeat for prod workspace
+terraform workspace select prod || terraform workspace new prod
+terraform plan -var-file=prod.tfvars
 terraform apply -var-file=prod.tfvars
+```
 
-3. **Destroy clusters**
+## Application Development & Containerization
 
-Staging:
+We use a Python Flask “Hello World” app.
+
+Steps:
+
+- Dockerize the app
+- Push to Google Container Registry (GCR)
+
+### Example Commands
 ```bash
-terraform workspace select staging
-terraform destroy -var-file=staging.tfvars
+Build and Push Docker Image
 
-Production:
-```bash
-terraform workspace select prod
-terraform destroy -var-file=prod.tfvars
+# Build image
+docker build -t gcr.io/<PROJECT_ID>/hello-app:latest ./app
 
-## Build & Push Docker Image to Artifact Registry
+# Authenticate with GCP
+gcloud auth configure-docker
 
-**Build and Tag Docker Image**
+# Push image
+docker push gcr.io/<PROJECT_ID>/hello-app:latest
 
-Build your image (adjust my-app and path as needed):
-```bash
-docker build -t hello-app:latest .
-docker tag hello-app:latest gcr.io/<PROJECT_ID>/hello-app:latest
-
-**Push Image to Artifact Registry**
-```bash
-docker push docker push gcr.io/<PROJECT_ID>/my-app-repo/my-app:latest
-
-**Verify Image Upload**
-```bash
-gcloud container images list --repository=gcr.io/<PROJECT_ID>/my-app-repo
+# Verify image in GCR
+gcloud container images list-tags gcr.io/<PROJECT_ID>/hello-app
+```
 
 ## Helm Deployment
 
-Chart Structure
+Helm chart webapp created for multi-environment deployment
 
-webapp/
-├── Chart.yaml
-├── values.yaml
-├── values-staging.yaml
-├── values-prod.yaml
-└── templates/
-    ├── _helpers.tpl
-    ├── deployment.yaml
-    └── service.yaml
+Templates:
+* deployment.yaml
+* service.yaml
 
-Deployment
+Environment-specific values files:
+* values-staging.yaml
+* values-prod.yaml
 
-# Deploy staging
+Common values.yaml contains defaults
+
+Deploy Locally (Template Rendering)
 ```bash
-helm install webapp ./webapp -f values-staging.yaml --namespace staging
+# Staging
+helm template webapp ./helm/webapp -f ./helm/webapp/values-staging.yaml --namespace staging
 
-# Deploy production
+# Production
+helm template webapp ./helm/webapp -f ./helm/webapp/values-prod.yaml --namespace production
+```
+
+## CI/CD Pipeline
+
+Pipeline implemented using GitHub Actions:
+
+- Build – Build Docker image & push to GCR
+- Deploy to Staging – Helm deploy to staging environment
+- Approve – Manual approval:
+   * GitHub actor must be in ALLOWED_PROD_USERS
+   * Commit must be tagged with Semantic Versioning (vX.Y.Z)
+
+- Deploy to Production – Helm deploy to production environment
+
+Secrets Required
+
+* GCP_SA_KEY	      (Service account JSON for GCP)
+* GCP_PROJECT_ID	   (GCP project ID)
+* ALLOWED_PROD_USERS	(Comma-separated GitHub usernames allowed to deploy production)
+
+Trigger
+* Staging – Any push to main
+* Production – Push with valid SemVer tag (e.g., v1.0.0)
+
+### Security Considerations
+
+No sensitive information committed to repo
+GCP credentials stored in GitHub Secrets
+Helm values use environment-specific files, repository paths are parameterized
+Only allowed users can deploy to production
+
+### Testing
+
+Verify Docker image in GCR
+Test Helm templates locally
+Ensure staging deployment works via CI/CD
+Tag a commit with vX.Y.Z to test production deployment
+Confirm manual approval and user restriction logic
+
+### Cleanup
+
+To avoid GCP billing:
 ```bash
-helm install webapp ./webapp -f values-prod.yaml --namespace production
+# Destroy staging
+terraform workspace select staging
+terraform destroy -var-file=staging.tfvars
+
+# Destroy production
+terraform workspace select prod
+terraform destroy -var-file=prod.tfvars
+```

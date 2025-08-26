@@ -1,0 +1,114 @@
+name: CI/CD Pipeline - Project WebApp
+
+on:
+  push:
+    branches:
+      - main
+  push:
+    tags:
+      - 'v*.*.*' # Semantic versioning for production
+
+jobs:
+  build:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Authenticate with GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure GCP project
+        run: gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Build Docker image
+        run: docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-app:latest ./app
+
+      - name: Push Docker image
+        run: docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-app:latest
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Get kubeconfig for staging
+        run: |
+          gcloud container clusters get-credentials webapp-staging \
+            --region us-central1 \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Deploy Helm chart to Staging
+        run: |
+          helm upgrade --install webapp ./helm/webapp \
+            -f ./helm/webapp/values-staging.yaml \
+            --namespace staging
+
+  approve-production:
+    name: Manual Approval for Production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Manual approval & checks
+        run: |
+          echo "Triggering user: $GITHUB_ACTOR"
+          ALLOWED_USERS="${{ secrets.ALLOWED_PROD_USERS }}"
+          if ! echo "$ALLOWED_USERS" | grep -qw "$GITHUB_ACTOR"; then
+            echo "Error: User $GITHUB_ACTOR is not allowed to deploy to production."
+            exit 1
+          fi
+
+          # Ensure triggered by a tag
+          if [ -z "$GITHUB_REF" ]; then
+            echo "Error: No Git ref found. Abort."
+            exit 1
+          fi
+
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "Tag name: $TAG_NAME"
+
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Tag $TAG_NAME does not match Semantic Versioning."
+            exit 1
+          fi
+
+          echo "✅ Approval passed. Production deploy allowed."
+
+  deploy-production:
+    name: Deploy to Production
+    needs: approve-production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Get kubeconfig for production
+        run: |
+          gcloud container clusters get-credentials webapp-prod \
+            --region us-central1 \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Deploy Helm chart to Production
+        run: |
+          helm upgrade --install webapp ./helm/webapp \
+            -f ./helm/webapp/values-prod.yaml \
+            --namespace production
