@@ -1,7 +1,7 @@
 # project-webapp
 Project to host a webapp
 
-# GKE Infrastructure with Terraform, Docker.
+# GKE Infrastructure with Terraform, Docker, Helm.
 
 This repository contains Terraform code to provision GKE clusters in different environments (staging and prod), and automation scripts to build and push Docker images to Google Artifact Registry.
 
@@ -93,3 +93,26 @@ docker push docker push gcr.io/<PROJECT_ID>/my-app-repo/my-app:latest
 ```bash
 gcloud container images list --repository=gcr.io/<PROJECT_ID>/my-app-repo
 
+## Helm Deployment
+
+Chart Structure
+
+webapp/
+├── Chart.yaml
+├── values.yaml
+├── values-staging.yaml
+├── values-prod.yaml
+└── templates/
+    ├── _helpers.tpl
+    ├── deployment.yaml
+    └── service.yaml
+
+Deployment
+
+# Deploy staging
+```bash
+helm install webapp ./webapp -f values-staging.yaml --namespace staging
+
+# Deploy production
+```bash
+helm install webapp ./webapp -f values-prod.yaml --namespace production
