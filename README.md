@@ -1,9 +1,9 @@
 # project-webapp
 Project to host a webapp
 
-# GKE Cluster Provisioning with Terraform
+# GKE Infrastructure with Terraform, Docker.
 
-This repository contains Terraform code to provision **Google Kubernetes Engine (GKE)** clusters for multiple environments (`staging` and `prod`) using **Terraform workspaces** for state isolation.
+This repository contains Terraform code to provision GKE clusters in different environments (staging and prod), and automation scripts to build and push Docker images to Google Artifact Registry.
 
 ---
 
@@ -16,6 +16,10 @@ project-webapp/
 ├── outputs.tf
 ├── staging.tfvars
 ├── prod.tfvars
+├── app/                         # Application development and containerization
+├── app.py
+├── Dockerfile
+├── requirements.txt
 ├── .gitignore
 └── README.md
 
@@ -71,3 +75,21 @@ Production:
 ```bash
 terraform workspace select prod
 terraform destroy -var-file=prod.tfvars
+
+## Build & Push Docker Image to Artifact Registry
+
+**Build and Tag Docker Image**
+
+Build your image (adjust my-app and path as needed):
+```bash
+docker build -t hello-app:latest .
+docker tag hello-app:latest gcr.io/<PROJECT_ID>/hello-app:latest
+
+**Push Image to Artifact Registry**
+```bash
+docker push docker push gcr.io/<PROJECT_ID>/my-app-repo/my-app:latest
+
+**Verify Image Upload**
+```bash
+gcloud container images list --repository=gcr.io/<PROJECT_ID>/my-app-repo
+
