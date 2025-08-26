@@ -1,52 +1,39 @@
 variable "project_id" {
-  type        = string
-  description = "GCP project ID"
+  type = string
 }
 
 variable "region" {
-  type        = string
-  description = "GCP region"
-  default     = "us-central1"
+  type = string
 }
 
 variable "cluster_name" {
-  type        = string
-  description = "Name of the GKE cluster"
-}
-
-variable "node_type" {
-  type        = string
-  description = "Machine type for GKE nodes"
-  default     = "e2-medium"
-}
-
-variable "node_count" {
-  type        = number
-  description = "Number of nodes in the pool"
-  default     = 2
+  type = string
 }
 
 variable "environment" {
-  type        = string
-  description = "Environment (staging/prod)"
+  type = string
 }
 
-variable "subnet_cidr" {
-  description = "Primary subnet CIDR"
-  type        = string
+variable "node_count" {
+  type = number
 }
 
-variable "pods_cidr" {
-  description = "Secondary range for Pods"
-  type        = string
-}
-
-variable "services_cidr" {
-  description = "Secondary range for Services"
-  type        = string
+variable "node_type" {
+  type = string
 }
 
 variable "master_ipv4_cidr_block" {
-  description = "CIDR block for the GKE master endpoint"
-  type        = string
+  type = string
+}
+
+variable "subnet_cidr" {
+  type = string
+}
+
+variable "pods_cidr" {
+  type = string
+}
+
+variable "services_cidr" {
+  type = string
 }
