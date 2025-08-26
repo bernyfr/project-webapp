@@ -1,4 +1,4 @@
-# DevOps Assignment – Hello App on GKE
+# Hello WebApp on GKE
 
 This repository contains a simple "Hello World" web application deployed on **Google Kubernetes Engine (GKE)** using **Terraform**, **Helm**, and **GitHub Actions** CI/CD.
 
