@@ -1,0 +1,16 @@
+replicaCount: 1
+
+image:
+  repository: gcr.io/web-application-470019/hello-app
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+  port: 80
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
