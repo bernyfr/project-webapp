@@ -86,10 +86,11 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
-      - name: Get GKE credentials (staging)
-        run: |
-          gcloud container clusters get-credentials "${{ env.CLUSTER_STAGING }}" \
-            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v1
+        with:
+          cluster_name: ${{ env.CLUSTER_STAGING }}
+          location: ${{ env.REGION }}
 
       - name: Create namespace (idempotent)
         run: |
@@ -157,10 +158,11 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
-      - name: Get GKE credentials (prod)
-        run: |
-          gcloud container clusters get-credentials "${{ env.CLUSTER_PROD }}" \
-            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v1
+        with:
+          cluster_name: ${{ env.CLUSTER_STAGING }}
+          location: ${{ env.REGION }}
 
       - name: Create namespace (idempotent)
         run: |
