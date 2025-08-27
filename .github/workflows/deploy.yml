@@ -9,8 +9,8 @@ env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   LOCATION: us
-  CLUSTER_STAGING: webapp-staging
-  CLUSTER_PROD: webapp-prod
+  CLUSTER_STAGING: staging-webapp
+  CLUSTER_PROD: prod-webapp
   NAMESPACE_STAGING: staging
   NAMESPACE_PROD: production
   CHART_PATH: ./helm/webapp
