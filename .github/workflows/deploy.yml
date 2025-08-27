@@ -6,13 +6,16 @@ on:
     tags:     [ "v*.*.*" ]
 
 env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
+  LOCATION: us
   CLUSTER_STAGING: webapp-staging
   CLUSTER_PROD: webapp-prod
   NAMESPACE_STAGING: staging
   NAMESPACE_PROD: production
   CHART_PATH: ./helm/webapp
   IMAGE_NAME: hello-app
+  REPOSITORY: webapp-repo    # <-- replace if you want a different Artifact Registry repo name
 
 permissions:
   contents: read
@@ -29,15 +32,15 @@ jobs:
       - name: Install gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker gcr.io --quiet
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.LOCATION }}-docker.pkg.dev --quiet
 
       - name: Compute image tag (SHA for branches, tag for releases)
         id: meta
@@ -52,15 +55,15 @@ jobs:
 
       - name: Build image
         run: |
-          docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }} ./app
+          docker build -t ${{ env.LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }} ./app
 
       - name: Push image
         run: |
-          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }}
+          docker push ${{ env.LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }}
 
   deploy-staging:
     name: Deploy to Staging
-    if: startsWith(github.ref, 'refs/heads/')   # only on branch pushes
+    if: startsWith(github.ref, 'refs/heads/')
     needs: build
     runs-on: ubuntu-latest
     environment: staging
@@ -70,7 +73,7 @@ jobs:
       - name: Install gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
@@ -86,7 +89,7 @@ jobs:
       - name: Get GKE credentials (staging)
         run: |
           gcloud container clusters get-credentials "${{ env.CLUSTER_STAGING }}" \
-            --region "${{ env.REGION }}" --project "${{ secrets.GCP_PROJECT_ID }}"
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
 
       - name: Create namespace (idempotent)
         run: |
@@ -101,12 +104,12 @@ jobs:
           helm upgrade --install webapp ${{ env.CHART_PATH }} \
             -f ${{ env.CHART_PATH }}/values-staging.yaml \
             --namespace ${{ env.NAMESPACE_STAGING }} \
-            --set image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }} \
+            --set image.repository=${{ env.LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ needs.build.outputs.image_tag }}
 
   approve-production:
     name: Manual Approval & Policy Checks
-    if: startsWith(github.ref, 'refs/tags/')    # only on tag pushes
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -131,17 +134,17 @@ jobs:
 
   deploy-production:
     name: Deploy to Production
-    if: startsWith(github.ref, 'refs/tags/')    # only on tag pushes
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [build, approve-production]
     runs-on: ubuntu-latest
-    environment: production   # <-- requires manual approval in GitHub Environments
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
       - name: Install gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
@@ -157,7 +160,7 @@ jobs:
       - name: Get GKE credentials (prod)
         run: |
           gcloud container clusters get-credentials "${{ env.CLUSTER_PROD }}" \
-            --region "${{ env.REGION }}" --project "${{ secrets.GCP_PROJECT_ID }}"
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
 
       - name: Create namespace (idempotent)
         run: |
@@ -172,5 +175,5 @@ jobs:
           helm upgrade --install webapp ${{ env.CHART_PATH }} \
             -f ${{ env.CHART_PATH }}/values-prod.yaml \
             --namespace ${{ env.NAMESPACE_PROD }} \
-            --set image.repository=gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }} \
+            --set image.repository=${{ env.LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ needs.build.outputs.image_tag }}
