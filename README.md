@@ -145,4 +145,4 @@ terraform destroy -var-file=staging.tfvars
 # Destroy production
 terraform workspace select prod
 terraform destroy -var-file=prod.tfvars
-```# touch
+```
