@@ -132,7 +132,7 @@ Verify Docker image in GCR
 Test Helm templates locally
 Ensure staging deployment works via CI/CD
 Tag a commit with vX.Y.Z to test production deployment
-Confirm manual approval and user restriction logic
+Confirm manual approval and user restriction logic.
 
 ### Cleanup
 
