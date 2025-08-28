@@ -48,6 +48,20 @@ terraform plan -var-file=prod.tfvars
 terraform apply -var-file=prod.tfvars
 ```
 
+### Example of tfvars file
+```bash
+project_id              = "<YOUR-PROJECT-ID>"
+region                  = "us-central1"
+cluster_name            = "<YOUR-CLUSTER-NAME>"
+node_type               = "e2-micro"
+node_count              = 1
+environment             = "staging"
+master_ipv4_cidr_block  = "0.0.0.0/0"
+subnet_cidr             = "0.0.0.0/0"
+pods_cidr               = "0.0.0.0/0"
+services_cidr           = "0.0.0.0/0"
+```
+
 ## Application Development & Containerization
 
 We use a Python Flask “Hello World” app.
